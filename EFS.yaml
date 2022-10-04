@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC from where will get subnets for mount targets"
+        Parameters:
+          - VPCStackNameToImport
+    ParameterLabels:
+      VPCStackNameToImport:
+        default: "VPC Stack name"
+Description: "EFS deployment for WEB Server - /var/www/html"
+
+Parameters:
+  VPCStackNameToImport:
+    Description: Name of an existing stack from where we want to import VPCIs, Subnets and CIDRs
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: VPCStackName
+
+Resources:
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-SGforEFS"
+      GroupDescription: "Security group for EFS - NFS port 2049"
+      VpcId: !ImportValue
+        Fn::Sub: ${VPCStackNameToImport}::VPCId
+      SecurityGroupIngress:
+      # restrict access only to app ranges
+      - IpProtocol: tcp
+        FromPort: 2049
+        ToPort: 2049
+        CidrIp: !Select [ 0, !Split [';', Fn::ImportValue: !Sub "${VPCStackNameToImport}::AppSubnets"] ]
+      - IpProtocol: tcp
+        FromPort: 2049
+        ToPort: 2049
+        CidrIp: !Select [ 1, !Split [';', Fn::ImportValue: !Sub "${VPCStackNameToImport}::AppSubnets"] ]
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-SGforEFS"
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      Encrypted: true
+      # KmsKeyId: String
+      # Prevent anonymous access and Enforce in-transit encryption for all clients
+      FileSystemPolicy:
+        {
+            "Version": "2012-10-17",
+            "Id": {"Fn::Sub": "${AWS::StackName}-efs-policy-00001"},
+            "Statement": [
+                {
+                    "Sid": {"Fn::Sub": "${AWS::StackName}-efs-statement-00001"},
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": "*"
+                    },
+                    "Action": [
+                        "elasticfilesystem:ClientRootAccess",
+                        "elasticfilesystem:ClientMount",
+                        "elasticfilesystem:ClientWrite"
+                    ],
+                    "Condition": {
+                        "Bool": {
+                            "elasticfilesystem:AccessedViaMountTarget": "true"
+                        }
+                    }
+                }
+            ]
+        }
+      ThroughputMode: bursting
+      BackupPolicy:
+        Status: ENABLED
+      FileSystemTags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-HttpVolume"
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        !Ref FileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub "${VPCStackNameToImport}::AppSubnet1ID"
+      SecurityGroups:
+      - !Ref MountTargetSecurityGroup
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        !Ref FileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub "${VPCStackNameToImport}::AppSubnet2ID"
+      SecurityGroups:
+      - !Ref MountTargetSecurityGroup
+
+# Store Parameters in System Manager Store
+  ParEfsDNSName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "EfsDNSName"
+      Type: String
+      Value:
+        Fn::Sub: "${FileSystem}.efs.${AWS::Region}.amazonaws.com"
+
+Outputs:
+  FileSystemID:
+    Description: File system ID
+    Value:
+      !Ref FileSystem
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::EFSInstanceID'
+  EFSMountHelper:
+    Description: EFS mount helper
+    Value: !Sub "sudo mount -t efs -o tls ${FileSystem}:/ /var/www/html"
+  MountTarget1ID:
+    Description: Mount target 1 ID
+    Value:
+      !Ref MountTarget1
+  MountTarget2ID:
+    Description: Mount target 2 ID
+    Value:
+      !Ref MountTarget2

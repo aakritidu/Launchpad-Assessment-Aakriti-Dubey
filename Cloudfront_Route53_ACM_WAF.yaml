@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates CloudFront distribution
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: practice.ga
+
+Resources:
+  HostedZone:
+    Type: "AWS::Route53::HostedZone"
+    Properties:
+      Name: !Ref DomainName
+  DNSRecord1:
+     Type: AWS::Route53::RecordSet
+     DependsOn:
+       - CloudFrontDistribution
+       - HostedZone
+     Properties:
+        Name: !Ref DomainName
+        Type: A
+        HostedZoneId: !GetAtt HostedZone.Id
+        AliasTarget:
+           DNSName: !GetAtt CloudFrontDistribution.DomainName
+           HostedZoneId: Z2FDTNDATAQYW2
+
+  ACMCertificate:
+    Type: "AWS::CertificateManager::Certificate"
+    Properties:
+      DomainName: !Ref DomainName
+      DomainValidationOptions:
+            - DomainName: !Ref DomainName
+              HostedZoneId: !GetAtt HostedZone.Id
+      ValidationMethod: DNS
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution    
+    Properties:
+      DistributionConfig:
+        Aliases: 
+          - !Ref DomainName
+        WebACLId: !GetAtt WebACL.Arn
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificate
+          SslSupportMethod: sni-only
+        Origins:
+          - DomainName: stackalb-loadbalancer-1432618922.eu-central-1.elb.amazonaws.com #Fn::ImportValue: "ALBDNSName"     
+            Id: stackalb-loadbalancer-1432618922.eu-central-1.elb.amazonaws.com #Fn::ImportValue: "ALBDNSName"     
+            CustomOriginConfig:
+              HTTPPort: 80                
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        Enabled: true
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: stackalb-loadbalancer-1432618922.eu-central-1.elb.amazonaws.com #Fn::ImportValue: "ALBDNSName"
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          ViewerProtocolPolicy: redirect-to-https
+
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Scope: CLOUDFRONT
+      Description: WAFv2 ACL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: "WebACLMetric"
+      Rules:
+        - Name: RuleWithAWSManagedRules
+          Priority: 0
+          OverrideAction:
+            Count: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: false
+            CloudWatchMetricsEnabled: true
+            MetricName: "RuleWithAWSManagedRulesMetric"
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules: []
+        - Name: BlockXssAttack
+          Priority: 1
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: "BlockXssAttackMetric"
+          Statement:
+            XssMatchStatement:
+              FieldToMatch:
+                AllQueryArguments: {}
+              TextTransformations:
+                - Priority: 1
+                  Type: NONE
