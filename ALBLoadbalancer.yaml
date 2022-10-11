@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+    AWS::CloudFormation::Interface:
+      ParameterGroups:
+        - Label:
+            default: "Instance connection"
+          Parameters:
+            - VPCStackNameToImport
+      ParameterLabels:
+        VPCStackNameToImport:
+          default: "VPC Stack name"
+Description: "ALB - Application Load Balancer deployment for WEB Server"
+
+Parameters:
+  VPCStackNameToImport:
+    Description: Name of an existing stack from where we want to import VPCIs, Public subnet and CIDR
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: VPCStackName
+  # ListenerCertificate:
+  #   Description: Select existing certificate for ALB Loadbalancer 443 Listener.
+
+Resources:
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-SGforALB"
+      GroupDescription: "Open Ports 80 and 443 for Web Servers"
+      VpcId: !ImportValue
+        Fn::Sub: ${VPCStackNameToImport}::VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-SGforALB"
+
+  LoadBalancerPublicApp:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Name: !Sub "${AWS::StackName}-LoadBalancer"
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - Fn::ImportValue: !Sub '${VPCStackNameToImport}::PublicSubnet1ID'
+        - Fn::ImportValue: !Sub '${VPCStackNameToImport}::PublicSubnet2ID'
+      Type: application
+
+  PublicAppLoadBalancerTargetGroup80:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /index.php
+      HealthCheckTimeoutSeconds: 5
+      Port: 80
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-LoadBalancerTG80"
+      UnhealthyThresholdCount: 5
+      VpcId: !ImportValue
+        Fn::Sub: ${VPCStackNameToImport}::VPCId
+
+  PublicAppLoadBalancerTargetGroup443:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /index.php
+      HealthCheckTimeoutSeconds: 5
+      Port: 443
+      Protocol: HTTPS
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-LoadBalancerTG443"
+      UnhealthyThresholdCount: 5
+      VpcId: !ImportValue
+        Fn::Sub: ${VPCStackNameToImport}::VPCId
+
+  PublicAppLoadBalancerListener80:
+    Type : AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref PublicAppLoadBalancerTargetGroup80
+      LoadBalancerArn: !Ref LoadBalancerPublicApp
+      Port: 80
+      Protocol: HTTP
+
+  # PublicAppLoadBalancerListener443:
+  #   Type : AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     Certificates: !Ref ListenerCertificate
+  #     SslPolicy: ELBSecurityPolicy-2016-08
+  #     DefaultActions:
+  #     - Type: forward
+  #       TargetGroupArn: !Ref PublicAppLoadBalancerTargetGroup443
+  #     LoadBalancerArn: !Ref LoadBalancerPublicApp
+  #     Port: 443
+  #     Protocol: HTTPS
+
+# Store Parameters in System Manager Store
+  ParALBStack:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "ALBStackName"
+      Type: String
+      Value: !Ref "AWS::StackName"
+
+  ParALBSecurityGroup:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "ALBSecurityGroup"
+      Type: String
+      Value: !Ref LoadBalancerSecurityGroup
+
+  ParALBDNSName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "ALBDNSName"
+      Type: String
+      Value: !GetAtt LoadBalancerPublicApp.DNSName
+
+Outputs:
+  PublicAlbTargetGroupArn80:
+    Value:
+      !Ref PublicAppLoadBalancerTargetGroup80
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::PublicArnTargetGroup'
+  PublicAlbTargetGroupArn443:
+    Value:
+      !Ref PublicAppLoadBalancerTargetGroup443
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::PublicArnTargetGroup443'
+  PublicAlbCanonicalHostedZoneId:
+    Value:
+      !GetAtt LoadBalancerPublicApp.CanonicalHostedZoneID
+  PublicAlbDnsName:
+    Value:
+      !GetAtt LoadBalancerPublicApp.DNSName
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::PublicAlbDNSName'
+  PublicAlbFullName:
+    Value:
+      !GetAtt LoadBalancerPublicApp.LoadBalancerFullName
+  PublicAlbHostname:
+    Value:
+      Fn::Sub:
+        - 'http://${ALBDNS}'
+        - ALBDNS: !GetAtt LoadBalancerPublicApp.DNSName
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::PublicAlbHostname'
+  AlbSecurityGroupId:
+    Value: !Ref LoadBalancerSecurityGroup
+    Export:
+      Name:
+        Fn::Sub: '${AWS::StackName}::AlbSecurityGroupId'

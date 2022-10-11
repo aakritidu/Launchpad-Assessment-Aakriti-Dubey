@@ -20,11 +20,7 @@ Metadata:
         Parameters:
           - SubnetApp1CIDR
           - SubnetApp2CIDR
-      - Label:
-          default: "Data subnet CIDR"
-        Parameters:
-          - SubnetData1CIDR
-          - SubnetData2CIDR
+
 Description:
   Template for VPC Creation with two subnets, NAT and Internet gateways.
 
@@ -33,6 +29,7 @@ Parameters:
     Description: An environment name that is prefixed as project name.
     Type: String
     MaxLength: 256
+    Default: TestEnv
   VPCCIDR:
     Description: Please enter the IP range (CIDR notation) for this VPC
     Type: String
@@ -73,22 +70,7 @@ Parameters:
     MaxLength: '18'
     AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
     ConstraintDescription: "Must be a valid IP CIDR range of the form x.x.x.x/x."
-  SubnetData1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the data1 subnet.
-    Type: String
-    Default: 10.0.4.0/24
-    MinLength: '9'
-    MaxLength: '18'
-    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-    ConstraintDescription: "Must be a valid IP CIDR range of the form x.x.x.x/x."
-  SubnetData2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the data2 subnet.
-    Type: String
-    Default: 10.0.5.0/24
-    MinLength: '9'
-    MaxLength: '18'
-    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-    ConstraintDescription: "Must be a valid IP CIDR range of the form x.x.x.x/x."
+
 
 Resources:
 # VPC and Internet Gateway
@@ -158,25 +140,6 @@ Resources:
         - Key: Name
           Value: !Join [ "", [ "App-",!Select [ 1, !GetAZs  '' ] ] ]
 
-  SubnetData1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
-      VpcId: !Ref ProjVPC
-      CidrBlock: !Ref SubnetData1CIDR
-      Tags:
-        - Key: Name
-          Value: !Join [ "", [ "Data-",!Select [ 0, !GetAZs  '' ] ] ]
-
-  SubnetData2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
-      VpcId: !Ref ProjVPC
-      CidrBlock: !Ref SubnetData2CIDR
-      Tags:
-        - Key: Name
-          Value: !Join [ "", [ "Data-",!Select [ 1, !GetAZs  '' ] ] ]
 
 # Route table public, assiociate subnet and create route
   RouteTablePublic:
@@ -268,19 +231,7 @@ Resources:
     Properties:
       RouteTableId: !Ref RouteTablePrivate2
       SubnetId: !Ref SubnetApp2
-
-  DataSubnet1RouteTablePrivateAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref RouteTablePrivate1
-      SubnetId: !Ref SubnetData1
-
-  DataSubnet2RouteTablePrivateAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref RouteTablePrivate2
-      SubnetId: !Ref SubnetData2
-
+      
   RoutePriv1:
     Type: AWS::EC2::Route
     Properties:
@@ -294,6 +245,7 @@ Resources:
       RouteTableId: !Ref RouteTablePrivate2
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway2
+
 
 # Store Parameters in System Manager Store
   ParVPCId:
@@ -329,20 +281,6 @@ Outputs:
     Export:
       Name:
         Fn::Sub: '${AWS::StackName}::PublicSubnet2ID'
-
-  DataSubnet1Id:
-    Description: Data 1 subnet id
-    Value: !Ref SubnetData1
-    Export:
-      Name:
-        Fn::Sub: '${AWS::StackName}::DataSubnet1ID'
-
-  DataSubnet2Id:
-    Description: Data 2 subnet id
-    Value: !Ref SubnetData2
-    Export:
-      Name:
-        Fn::Sub: '${AWS::StackName}::DataSubnet2ID'
 
   AppSubnet1Id:
     Description: App 1 subnet id
@@ -388,10 +326,4 @@ Outputs:
       Name:
         Fn::Sub: '${AWS::StackName}::AppSubnets'
 
-  DataSubnetCIDRs:
-    Description: A list of the data subnets
-    Value:
-      Fn::Join: [ ";", [!Ref SubnetData1CIDR,!Ref SubnetData2CIDR]  ]
-    Export:
-      Name:
-        Fn::Sub: '${AWS::StackName}::DataSubnets'
+
